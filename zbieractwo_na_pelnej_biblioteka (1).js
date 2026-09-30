@@ -2,7 +2,7 @@
 // By uploading a user-generated mod for use with Tribal Wars, the creator grants InnoGames a perpetual, irrevocable, worldwide, royalty-free, non-exclusive license to use, reproduce, distribute, publicly display, modify, and create derivative works of the mod. This license permits InnoGames to incorporate the mod into any aspect of the game and its related services, including promotional and commercial endeavors, without any requirement for compensation or attribution to the uploader. The uploader represents and warrants that they have the legal right to grant this license and that the mod does not infringe upon any third-party rights. German law applies.
 //
 // author: Desunia
-// version: 10.2
+// version: 1
 // Zbieractwo na pelnej / Full Scavenging
 // Jezyk: polski na swiatach .plemiona.pl i przy locale pl_*, angielski gdzie indziej.
 // Language: Polish on .plemiona.pl worlds and pl_* locales, English everywhere else.
@@ -10,9 +10,9 @@
 // The script makes no outside connections - everything stays in the browser's local storage.
 
 // ==UserScript==
-// @name         Zbieractwo na pelnej by Desunia
+// @name         Zbieractwo na pelnej
 // @namespace    https://plemiona.pl/
-// @version      10.2.0
+// @version      1
 // @description  Planer zbieractwa: liczy podzial wojska wzorem gry, wypelnia formularz i pilnuje czasow powrotu ze wszystkich wiosek. Start klika gracz.
 // @author       Desunia
 // @match        https://*.plemiona.pl/game.php*
@@ -42,21 +42,13 @@
 // ==/UserScript==
 
 /*
- *  CO ROBI        : liczy podzial, wpisuje jednostki w formularz, zapamietuje czasy powrotu
- *  CZEGO NIE ROBI : nie klika Start, nie wysyla zadan do serwera, nie ukrywa sie
+ *  CO ROBI        : liczy podzial, wpisuje jednostki w formularz, zapamietuje czasy powrotu, mass zbierak
+ *  CZEGO NIE ROBI : nie klika wyslij, nie wysyla zadan do serwera
  *
- *  MATEMATYKA (stale z klienta gry, wspolczynnik potwierdzony empirycznie na pl230):
+ *  MATEMATYKA (stale z klienta gry, wspolczynnik potwierdzony na pl230):
  *    lup   L = pojemnosc * LF,  LF = [0.10, 0.25, 0.50, 0.75]
  *    czas  t = (K * L^0.9 + 1800) * df,  K = 100^0.45,  df = predkosc^-0.55
  *    Najkrotszy mozliwy bieg to 1800 * df (przy L -> 0).
- *
- *  POPRAWKI v3 wobec v2:
- *    1. Limit czasu biegu naprawde dziala. Blad nie byl w liczeniu podzialu, tylko
- *       w rozdziale jednostek: allocate() normalizowal udzialy przez sume pojemnosci
- *       przydzielonych poziomom zamiast przez cala pule wojska, wiec zawsze wysylal
- *       wszystko, a limit znikal bez sladu. Teraz nadwyzka zostaje w wiosce.
- *    2. Czas biegu wpisuje sie jako g:mm (0:30, 1:00, 2:15). Samo "45" = 45 minut.
- *    3. Bisekcja nie schodzi juz do zera przy niewykonalnych limitach.
  */
 
 (function () {
