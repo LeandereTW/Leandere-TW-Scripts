@@ -49,14 +49,6 @@
  *    lup   L = pojemnosc * LF,  LF = [0.10, 0.25, 0.50, 0.75]
  *    czas  t = (K * L^0.9 + 1800) * df,  K = 100^0.45,  df = predkosc^-0.55
  *    Najkrotszy mozliwy bieg to 1800 * df (przy L -> 0).
- *
- *  POPRAWKI v3 wobec v2:
- *    1. Limit czasu biegu naprawde dziala. Blad nie byl w liczeniu podzialu, tylko
- *       w rozdziale jednostek: allocate() normalizowal udzialy przez sume pojemnosci
- *       przydzielonych poziomom zamiast przez cala pule wojska, wiec zawsze wysylal
- *       wszystko, a limit znikal bez sladu. Teraz nadwyzka zostaje w wiosce.
- *    2. Czas biegu wpisuje sie jako g:mm (0:30, 1:00, 2:15). Samo "45" = 45 minut.
- *    3. Bisekcja nie schodzi juz do zera przy niewykonalnych limitach.
  */
 
 (function () {
@@ -110,11 +102,6 @@
     const onScav = () => /screen=place/.test(location.href) && /mode=scavenge(?!_mass)/.test(location.href);
     const scr = () => document.querySelector('#scavenge_screen') || document.body;
 
-    /*  SONDA STRONY - v3.3
-     *  game_data i ScavengeScreen to zmienne strony. Jezeli menedzer skryptow
-     *  trzyma nas w piaskownicy, sa niewidoczne i wszystkie odczyty zwracaja
-     *  wartosci domyslne (stad uparte df 1.0000 i x1.00). Wstrzykniety <script>
-     *  wykonuje sie w kontekscie strony i przekazuje dane atrybutem na <html>.  */
     let PROBE = {};
     function readPage() {
         try {
@@ -148,26 +135,7 @@
         try { if (window.game_data && window.game_data.speed) return parseFloat(window.game_data.speed); } catch (e) {}
         return 0;
     }
-    /*  WSPOLCZYNNIK CZASU - v3.2
-     *  v3.1 opieral sie na game_data.speed i przy pl230 wychodzilo 1.0 zamiast 1.6,
-     *  wiec wszystkie czasy i sur/h byly policzone dla zlego swiata. Teraz
-     *  najpewniejszym zrodlem jest sama gra: bierzemy z ekranu wyswietlony lup
-     *  i wyswietlony czas dowolnego poziomu i odwracamy wzor. To dziala niezaleznie
-     *  od tego, czy game_data jest dostepne i czy nazwy pol sie nie zmienily.     */
-    /*  POPRAWKA v4.0 - pomiar TYLKO z kart wolnych.
-     *  Karta, na ktorej trwa misja, pokazuje licznik czasu POZOSTALEGO, a nie
-     *  pelnego czasu biegu, oraz lup juz wyslanego wojska. Wczesniej bralem je
-     *  do pomiaru i wychodzily z tego sprzeczne wspolczynniki (0,29 i 0,36 na
-     *  tym samym swiecie) oraz absurdalna predkosc x6,52.
-     *  Dodatkowo wymagamy, zeby iloraz lupu i wpisanej pojemnosci trafial w jeden
-     *  ze wspolczynnikow poziomu - to potwierdza, ze karta pokazuje podglad
-     *  dla NASZEGO wojska, a nie dane trwajacej juz misji.                      */
-    /*  POMIAR df ? v4.0
-     *  Karta, ktora JEST W TRAKCIE misji, pokazuje lup calej wysylki, ale czas
-     *  POZOSTALY do powrotu, a nie czas jej trwania. Odwrocenie wzoru na takich
-     *  danych daje wynik bez sensu (na pl232 wychodzilo x6,5 zamiast x1,25).
-     *  Mierzymy wiec wylacznie z kart WOLNYCH i dodatkowo sprawdzamy, czy lup
-     *  odpowiada wpisanej pojemnosci pomnozonej przez wspolczynnik poziomu.    */
+   
     function dfFromScreen() {
         const C = enteredCapacity();
         if (!(C > 0)) return null;
@@ -210,13 +178,12 @@
 
     /*  Wspolczynnik czasu da sie zmierzyc tylko na ekranie POJEDYNCZEJ wioski -
      *  na masowym karty poziomow pokazuja zera. Dlatego raz zmierzona wartosc
-     *  jest zapamietywana; bez tego skrypt spadal na 1,0 i czasy powrotow
-     *  wychodzily o ok. 30% za dlugie (09:45 zamiast 09:26).                  */
+     *  jest zapamietywana;                  */
     /*  Wspolczynnik czasu jest w ZRODLE strony zbieractwa masowego - gra
      *  wstawia tam blok konfiguracyjny ScavengeMassScreen z polami
      *  duration_factor / duration_exponent / duration_initial_seconds.
      *  Odczyt jest darmowy (zadnego zapytania) i dziala od razu, bez proszenia
-     *  gracza o cokolwiek. To ten odczyt wypadl przy przebudowie na DOM.      */
+     *  gracza o cokolwiek.      */
     function dfZeZrodla() {
         const sc = document.querySelectorAll('script');
         for (let i = 0; i < sc.length; i++) {
@@ -329,22 +296,8 @@
     }
     const startBtn = el => el ? el.querySelector('.free_send_button') : null;
 
-    /*  MAPOWANIE KART NA POZIOMY - v3.5, przyczyna sekwencji 4->2->3->1.
-     *  Do tej pory zakladalismy, ze n-ta karta .scavenge-option w DOM to n-ty
-     *  poziom zbieractwa. Gdy gra renderuje je w innej kolejnosci (albo selektor
-     *  lapie dodatkowy element), cale przyporzadkowanie przesuwa sie o stala
-     *  wartosc - stad zawsze ta sama zla sekwencja w kazdej wiosce.
-     *  Teraz poziom karty wyliczamy z tego, co gra sama pokazuje: iloraz
-     *  wyswietlonego lupu i wpisanej pojemnosci daje wprost wspolczynnik
-     *  poziomu (0.10 / 0.25 / 0.50 / 0.75), wiec mapowanie jest niezalezne
-     *  od kolejnosci i nazw w DOM.                                            */
     let LVLMAP = null;
 
-    /*  ODCZYT KARTY - v3.6
-     *  Poprzednia wersja parsowala textContent calej karty i dzielila po spacjach.
-     *  Gdy gra trzyma kazda liczbe w osobnym elemencie bez odstepu, textContent
-     *  skleja je w jeden ciag ("181817") i nie da sie ich rozdzielic. Dlatego
-     *  chodzimy teraz po wezlach tekstowych - kazda liczba jest wlasnym wezlem.  */
     function optionInfo(el) {
         const nums = [];
         let sec = null;
@@ -448,9 +401,7 @@
 
     /*  ODWROCENIE g'(L) = mu ROZWIAZANE ANALITYCZNIE.
      *  Podstawiajac u = K*L^0.9 warunek g'(L) = mu sprowadza sie do rownania
-     *  kwadratowego:  mu*u^2 + (3600mu - 0.1)*u + (3240000mu - 1800) = 0.
-     *  v3.1 szukal tego bisekcja (120 iteracji na kazde wywolanie, a wywolan
-     *  byly dziesiatki tysiecy na jedno przeliczenie) - stad zamulanie.        */
+     *  kwadratowego:  mu*u^2 + (3600mu - 0.1)*u + (3240000mu - 1800) = 0. */
     function solveLoot(mu) {
         if (!(mu > 0) || mu >= 1 / DIS) return 0;
         const a = mu, b = 3600 * mu - 0.1, c = 3240000 * mu - 1800;
@@ -468,21 +419,13 @@
     const capTooLow = s => s > 0 && (s / DF - DIS) <= 0;
     const minMinutes = () => Math.ceil(DIS * DF / 60);
 
-    /*  TRYBY A LIMIT CZASU - wyjasnienie, bo v3.1 mialo to odwrotnie.
+    /*  TRYBY A LIMIT CZASU - wyjasnienie
      *
      *  OPTIMUM maksymalizuje surowce na godzine przy DWOCH ograniczeniach:
      *  wielkosci armii i maksymalnym czasie biegu. Gdy armia jest duza, a limit
      *  ciasny, rozwiazaniem tego zadania jest wypelnienie KAZDEGO poziomu do
      *  sufitu limitu - czyli dokladnie rowne czasy. Optimum i rowny czas daja
-     *  wtedy ten sam wynik i to jest poprawne, a nie zepsute.
-     *
-     *  v3.1 zamiast tego skalowal cala pule w dol, az najdluzszy bieg zmiescil
-     *  sie w limicie. Krotsze biegi konczyly sie dlugo przed sufitem i marnowaly
-     *  przydzial - dlatego "optimum" wychodzilo GORSZE od rownego czasu.
-     *
-     *  Teraz: optimum przycina poziomy do sufitu (rozwiazanie zadania z limitem),
-     *  a dwa tryby o narzuconym ksztalcie skaluja pule, bo ich ksztalt jest
-     *  z definicji sztywny.                                                     */
+     *  wtedy ten sam wynik i to jest poprawne. */
     function splitOptimum(total, levels, maxSec) {
         const Lmax = lootCap(maxSec);
         const capsFor = lam => levels.map(i => Math.min(solveLoot(lam * DF / LF[i]), Lmax) / LF[i]);
@@ -543,7 +486,7 @@
         return out;
     }
 
-    /*  POPRAWKA v3 - udzialy liczone wzgledem CALEJ puli, nie wzgledem sumy
+    /*  POPRAWKA - udzialy liczone wzgledem CALEJ puli, nie wzgledem sumy
      *  przydzielonych pojemnosci. Dzieki temu limit czasu realnie zostawia
      *  nadwyzke wojska w wiosce zamiast rozpychac ja po poziomach.          */
     function allocate(p, caps) {
@@ -655,12 +598,6 @@
 
     /* ============================================== WYPELNIANIE FORMULARZA */
 
-    /*  v4.1 - ograniczenie ruchu.
-     *  Wczesniej kazde pole bylo nadpisywane i dostawalo trzy zdarzenia (input,
-     *  change, keyup), nawet gdy juz mialo wlasciwa wartosc. Przy osmiu polach,
-     *  czyszczonych i wypelnianych osobno, dawalo to 48 zdarzen na jedno
-     *  wypelnienie planu. Obsluga tych zdarzen po stronie gry moze odpytywac
-     *  serwer, wiec teraz dotykamy wylacznie pol, ktore faktycznie sie zmieniaja.  */
     let EVENTS_SENT = 0;
     function setVal(input, v) {
         if (!input) return;
@@ -696,13 +633,7 @@
         const s = nextStep();
         if (s) fillStep(s); else clearInputs();
     }
-    /*  POPRAWKA v3.4 - KRYTYCZNA.
-     *  Wczesniej auto-przejscie przesuwalo wskaznik licznikiem (pointer++), bez
-     *  sprawdzania, ktory poziom faktycznie zostal wyslany. Klikniecie Start przy
-     *  innym poziomie niz podswietlony powodowalo, ze skrypt wpisywal wojsko
-     *  przeznaczone dla zupelnie innego poziomu - z paczka liczona na inny czas
-     *  biegu. Teraz kolejny krok wybieramy po STANIE POZIOMOW odczytanym z gry,
-     *  a wyslane poziomy oznaczamy jawnie.                                      */
+   
     function markSent(levelIdx) {
         if (!plan || plan.error) return;
         plan.sent = plan.sent || {};
@@ -934,40 +865,6 @@
         document.head.appendChild(st);
     }
 
-
-    /* ==================================================================
-     *  ZBIERACTWO MASOWE - v5.0
-     *
-     *  ZASADA: zero dodatkowych zadan do serwera. Komplet danych (wojsko
-     *  w kazdej wiosce, ktore poziomy sa wolne, parametry czasu) jest juz
-     *  w zrodle strony zbieractwa masowego. Skrypt tylko je czyta,
-     *  wypelnia pola jednostek i zaznacza checkboxy. Przycisk Wyslij
-     *  klika gracz - i to gra, nie skrypt, wysyla do wielu wiosek naraz.
-     *
-     *  GRUPOWANIE: przy rownym czasie kazdy poziom potrzebuje pojemnosci
-     *  w stalej proporcji 10 : 4 : 2 : 1,33. Wioska ma wiec swoj naturalny
-     *  czas biegu - taki, przy ktorym cala jej pojemnosc idzie w ruch.
-     *  Wioski o zblizonym czasie laczymy w grupe; grupa dostaje czas
-     *  najslabszej z nich, nadwyzka zostaje w domu. Liczbe grup dobiera
-     *  programowanie dynamiczne: dokladamy grupe tak dlugo, jak zysk
-     *  przekracza prog, i nigdy nie tworzymy grupy mniejszej niz minimum.
-     * ================================================================== */
-
-    /* ==================================================================
-     *  ZBIERACTWO MASOWE - v5.1
-     *
-     *  DWA ZRODLA, ZERO DODATKOWYCH ZADAN:
-     *   KROK 1  Przeglad -> Wojska (mode=units, type=there)
-     *           Skrypt czyta z tabeli, ile wojska stoi w kazdej wiosce,
-     *           i zapamietuje to w przegladarce.
-     *   KROK 2  Plac -> Zbieractwo masowe
-     *           Skrypt czyta z DOM, ktore poziomy sa wolne w kazdej wiosce
-     *           (tr#scavenge_village_<id>, td.option-<n>), laczy to z danymi
-     *           z kroku 1, liczy grupy, wypelnia pola i zaznacza checkboxy.
-     *
-     *  Obie strony otwiera gracz. Skrypt niczego nie pobiera i nie wysyla.
-     * ================================================================== */
-
     const MASS_KEY = 'desunia_zbieractwo_masowe_v1';
     const onMass  = () => /screen=place/.test(location.href) && /mode=scavenge_mass/.test(location.href);
     const onUnits = () => /screen=overview_villages/.test(location.href) && /mode=units/.test(location.href);
@@ -998,13 +895,6 @@
         const order = unitOrder();
         if (!order.length) return { ile: 0, err: 'Nie znam kolejnosci jednostek na tym swiecie.' };
 
-        /*  POPRAWKA v6.7 - kluczowa.
-         *  Kazda wioska ma w przegladzie kilka wierszy: "w wiosce", "poza wioska",
-         *  "w drodze", "obrona". Wszystkie maja komorki td.unit-item. Wczesniej
-         *  bralem pierwsze 13 komorek z calego <tbody>, wiec trafialem w niewlasciwy
-         *  wiersz i liczby wychodzily zawyzone - skrypt wpisywal sklad, ktorego
-         *  wioski nie mialy, a gra oznaczala je czerwonym zakazem.
-         *  Teraz szukamy wiersza opisanego "w wiosce" i czytamy TYLKO jego.       */
         const wWiosce = tr => {
             const td = tr.children;
             for (let i = 0; i < td.length && i < 4; i++) {
@@ -1064,18 +954,12 @@
      *       <img class="status-unavailable" src="block_icon.png">
      *       <a  class="status-locked">
      *       <img class="status-unlocking" src="unlock_mini.png">
-     *    </td>
-     *  KOMPLET tych elementow jest w KAZDEJ komorce - gra pokazuje wlasciwy
-     *  przez CSS, sterujac klasa komorki. Dlatego stanu NIE WOLNO zgadywac po
-     *  zawartosci (v5.3 szukalo klodki i trafialo zawsze, bo "unlock_mini.png"
-     *  zawiera slowo lock). Stan czytamy wylacznie z klasy komorki.           */
+     *    </td> */
     function optState(td) {
         const cl = ' ' + (td.className || '') + ' ';
         const box = td.querySelector('input[type=checkbox]');
         /*  UWAGA: gra trzyma checkboxy WYLACZONE, dopoki w polach jednostek nie ma
-         *  wpisanego wojska. Stanu poziomu NIE WOLNO wiec wiazac z atrybutem
-         *  disabled - to byl powod, dla ktorego wszystkie 124 komorki wypadaly
-         *  jako nierozpoznane. Poziom wolny poznajemy po klasie komorki.        */
+         *  wpisanego wojska. Poziom wolny poznajemy po klasie komorki.        */
         const wolny = !!box && / option-inactive /.test(cl);
         return {
             box: box,
@@ -1135,11 +1019,7 @@
         rows.forEach(r => {
             MASS_SEEN[r.id] = true;
             const v = store[r.id] || { id: r.id, name: 'wioska ' + r.id, units: {}, unitsTs: 0 };
-            /*  Stan poziomu bierzemy WYLACZNIE z gry. W v6.3 dokladalem tu warunek
-             *  "nie ma zapisanego przyszlego powrotu" - i stare, blednie zapisane
-             *  powroty (nominalny czas grupy zamiast rzeczywistego) maskowaly
-             *  poziomy jako zajete na godziny, przez co wioski z pelna armia
-             *  wypadaly z planu. Pamiec skryptu nie moze nadpisywac stanu gry.  */
+            /*  Stan poziomu bierzemy WYLACZNIE z gry. */
             v.free = [1, 2, 3, 4].filter(l => r.opt[l] && r.opt[l].wolny);
             v.freeTs = Date.now();
             store[r.id] = v;
@@ -1177,15 +1057,13 @@
         return Math.max(0, ((v.units || {})[n] || 0) - res);
     }
 
-    /*  GRUPOWANIE PO WSPOLNYM MIANOWNIKU - v7.0
+    /*  GRUPOWANIE PO WSPOLNYM MIANOWNIKU 
      *
      *  Gra wysyla JEDEN sklad do wszystkich zaznaczonych wiosek, wiec o wartosci
      *  grupy decyduje nie suma jej pojemnosci, tylko to, co maja WSPOLNEGO:
      *    - wektor jednostek: minimum po wioskach dla kazdego typu,
      *    - poziomy: przeciecie wolnych poziomow.
-     *  Wczesniej grupy powstawaly wylacznie po pojemnosci, a czesc wspolna byla
-     *  dopiero skutkiem ubocznym - stad grupy, w ktorych sklad schodzil do zera.
-     *  Teraz koszt kazdego mozliwego podzialu liczony jest wprost z jego czesci
+     *  Koszt kazdego mozliwego podzialu liczony jest wprost z jego czesci
      *  wspolnej, a programowanie dynamiczne wybiera podzial najlepszy.         */
 
     function massPlan() {
@@ -1270,9 +1148,6 @@
 
         /*  Czesc wspolna odcinka [i..j]: wektor min i przeciecie poziomow.     */
         /*  Poziomy grupy to SUMA poziomow wolnych u jej wiosek, nie ich przeciecie.
-         *  Wymaganie przeciecia bylo bledne: wystarczylo, ze jedna wioska miala
-         *  wolny tylko poziom 1, a inna tylko 2-4, i caly podzial uznawalem za
-         *  niemozliwy ("nie da sie ulozyc grupy o wspolnym skladzie").
          *  Wysylka na dany poziom obejmuje po prostu te wioski, ktore go maja.
          *  Pojemnosc dzielimy wedlug sumy poziomow, wiec wioska o najwiekszej
          *  liczbie wolnych poziomow te\u017c sie w niej miesci.                     */
@@ -1369,9 +1244,7 @@
             };
             let r0 = licz(lv);
             /*  Prog liczymy na CZASIE GRUPY, nie na wlasnym czasie wioski.
-             *  Wioska o naturalnym czasie dwoch godzin trafia do grupy biegnacej
-             *  23 minuty, bo wspolny mianownik jest mniejszy - i to czas grupy
-             *  decyduje, czy poziom 1 ma sens.                                  */
+             *  I to czas grupy decyduje, czy poziom 1 ma sens.                                  */
             const pMin = parseInt(cfg.massSkipL1Min, 10) || 0;
             if (pMin > 0 && lv.length > 1 && lv.indexOf(1) >= 0 && r0.T < pMin * 60) {
                 const lv2 = lv.filter(l => l !== 1);
@@ -1384,10 +1257,7 @@
         const odrzuceni = [];
         const grupyCz = best.gr.map(par => {
             let cz = list.slice(par[0], par[1] + 1);
-            /*  Usuwamy tego czlonka, ktorego usuniecie NAJBARDZIEJ podnosi wartosc
-             *  grupy - a nie tego o najmniejszej lacznej pojemnosci. Grupe dusi
-             *  wioska majaca najmniej KONKRETNEJ jednostki (np. jeden topornik
-             *  przy sasiadach z tysiacami), a jej laczna pojemnosc bywa spora.  */
+            
             for (let krok = 0; krok < 12 && cz.length > 1; krok++) {
                 const teraz = wartoscCzl(cz).val;
                 let naj = -1, najVal = teraz;
@@ -1407,9 +1277,9 @@
         }).filter(cz => cz.length);
 
         /*  WYPYCHANIE MARNOWANYCH.
-         *  Odchudzanie wyzej usuwa karla duszacego grupe. Osobny przypadek to
-         *  olbrzym, ktoremu grupa nie szkodzi, ale ktory sam dostaje w niej
-         *  ulamek tego, co wyslalby solo (wspolny sklad jest mniejszy od jego
+         *  Odchudzanie wyzej usuwa wioski duszace grupe. Osobny przypadek to
+         *  wioska, ktorej grupa nie szkodzi, ale ktora sama dostaje w niej
+         *  ulamek tego, co wyslalaby solo (wspolny sklad jest mniejszy od jego
          *  wlasnego zapasu). Takie wioski tez wypychamy do puli resztek.       */
         grupyCz.forEach((cz, gi) => {
             if (cz.length < 2) return;
@@ -1477,8 +1347,6 @@
     }
 
     let LAST_MASS = null;
-    // Postep nie jest juz pamietany recznie: po wyslaniu poziom robi sie zajety
-    // i sam znika z planu, wiec nastepny krok to zawsze pierwsza pozycja listy.
     let MASS_SEEN = null;
     let MASS_BLOK = {};
     let MASS_ARM = null;       // przycisk czekajacy na drugie klikniecie (wyslij)        // wioski, ktorym gra odmowila - maja nieaktualny stan wojska
@@ -1486,10 +1354,7 @@
     let MASS_DONE = {};        // ktore wysylki z tego planu juz poszly
     /*  Dlaczego plan jest zamrazany:
      *  cztery wysylki jednej grupy dziela WSPOLNA pule wojska i maja miec ROWNY
-     *  czas biegu. Jesli przeliczac plan po kazdej wysylce, kolejny poziom
-     *  dostaje mniej wojska i inny czas, a poziomy niewyslane do wszystkich
-     *  wiosek wracaja jako nowa grupa - stad powtarzajace sie poziomy
-     *  i czasy 1:14 / 1:21 / 1:00 zamiast czterech rownych.                   */
+     *  czas biegu.            */
     function przeliczPlan() { MASS_PLAN = massPlan(); MASS_DONE = {}; return MASS_PLAN; }      // wioski widziane na tym ekranie (respektuje grupe wiosek)        // klucz "g<nr>-l<poziom>" -> wyslane w tej rundzie
 
     /*  Kolejnosc klikania ma znaczenie: sklady licza sie ze wspolnej puli od
@@ -1537,14 +1402,10 @@
             return { zazn: zazn, rows: widziane, zablokowane: zablokowane };
         };
 
-        // czas biegu wynika z tego, co naprawde wpisujemy - sklad bywa przeskalowany,
-        // wiec nominalny czas grupy bylby zawyzony
         const Treal = runTime(comp.cap * LF[level - 1]);
         LAST_MASS = { level: level, grupa: group.nr, T: Treal, alloc: comp.alloc, villages: [] };
         const r1 = zaznacz();
         if (LAST_MASS) LAST_MASS.villages = LAST_MASS.villages.filter((x, i, a) => a.indexOf(x) === i);
-        // wczesniej szlo tu przeliczPlan() - zamrozony plan znikal i cala tabela
-        // grup sie sypala. Teraz tylko odswiezamy widok tego samego planu.
         if (r1.zablokowane) setTimeout(render, 30);
         if (r1.zablokowane && !r1.zazn) {
             const inf0 = document.getElementById('znp-m-info');
@@ -1569,9 +1430,7 @@
     /*  Po kliknieciu przycisku Wyslij w grze zapisujemy spodziewane powroty:
      *  znamy czas biegu grupy i liste wiosek, ktore wlasnie zaznaczylismy.    */
     /*  Na ekranie masowym gra buduje tabele wiosek dopiero po zaladowaniu
-     *  strony. Panel potrafil sie odrysowac wczesniej i widzial zero wierszy
-     *  (diagnostyka: "wierszy wiosek na stronie: 0"), przez co plan wychodzil
-     *  pusty. Czekamy wiec na pojawienie sie wierszy i wtedy liczymy plan.    */
+     *  strony.     */
     function czekajNaTabele() {
         if (!onMass()) return;
         let prob = 0;
@@ -1597,10 +1456,7 @@
             const t = e.target;
             if (!t || !t.closest) return;
             /*  Przycisk wysylki rozpoznajemy po KLASIE, nie po napisie.
-             *  Napis zalezy od jezyka swiata ("Wyslij" / "Send" / "Senden"),
-             *  wiec dopasowanie tekstem dzialalo tylko na polskich Plemionach -
-             *  na pozostalych skrypt nie wiedzial, ze wysylka nastapila,
-             *  przez co nie odhaczal kroku ani nie zapisywal powrotow.        */
+             *  Napis zalezy od jezyka swiata ("Wyslij" / "Send" / "Senden"), */
             const btn = t.closest('a.btn-send, .btn-send, .send-row a.btn, .send-row input, .send-row button');
             if (!btn) return;
             const kl = ' ' + (btn.className || '') + ' ';
@@ -1613,7 +1469,7 @@
              *  dla wpisanego skladu - to najpewniejsze zrodlo. Dopiero gdy karty
              *  nie da sie odczytac, liczymy wzorem. Przy okazji, jesli karta
              *  podaje lup i czas, odswiezamy wspolczynnik czasu i zapamietujemy
-             *  go - to on powodowal czasy zawyzone o okolo 30%.               */
+             *  go                */
             const zm = dfFromScreen();
             if (zm) { DF = zm; DF_SRC = 'zmierzony z ekranu gry'; zapiszDF(zm); }
             const karta = options()[LAST_MASS.level - 1];
@@ -1640,8 +1496,7 @@
             MASS_DONE[massKey(LAST_MASS.grupa, LAST_MASS.level)] = true;
             MASS_ARM = null;
 
-            /*  Wojsko wlasnie wyszlo z wiosek - pomniejszamy zapamietany stan,
-             *  inaczej kolejne poziomy licza sie z armii, ktorej juz nie ma.   */
+            /*  Wojsko wlasnie wyszlo z wiosek - pomniejszamy zapamietany stan.   */
             const mag = loadMass();
             LAST_MASS.villages.forEach(id => {
                 const v = mag[id];
@@ -1740,12 +1595,6 @@
         }
         h += `</div>`;
 
-        /*  BEZ WSPOLCZYNNIKA CZASU NIE LICZYMY NIC.
-         *  Nie chodzi tylko o wyswietlane godziny powrotu: to on decyduje, jaki
-         *  lup miesci sie w limicie czasu, a wiec ile wojska trafia do skladu
-         *  i jak wioski dziela sie na grupy. Przy wartosci zastepczej 1,0 skrypt
-         *  uwaza, ze bieg trwa 3 h, gdy naprawde trwa 2:20 - i niedoladowuje
-         *  wioski, zostawiajac wojsko w domu.                                 */
         const dfPewny = DF_OK;
         if (!dfPewny) {
             return h + `<div class="znp-sec"><h4>Brak wsp\u00f3\u0142czynnika czasu \u2014 nie licz\u0119 planu</h4>
@@ -1795,10 +1644,6 @@
               : '<button class="znp-btn znp-pulse" id="znp-m-reszta">PRZELICZ POZOSTA\u0141E</button>'}</div>
           <table><tr><th>GR</th><th>CZAS</th><th>WIOSEK</th><th>BEZCZYNNE</th><th>POZIOMY</th></tr>`;
         plan.groups.forEach(g => {
-            /*  Idziemy po poziomach GRUPY (g.lvls), a nie po sztywnym 1-4.
-             *  Przycisk poziomu 1 potrafil sie pokazac nawet wtedy, gdy regula
-             *  progu czasowego wyrzucila ten poziom ze zbioru poziomow grupy -
-             *  kolejnosc krokow juz go pomijala, wiec widok klamal.            */
             const poz = (cfg.order === 'desc' ? [4, 3, 2, 1] : [1, 2, 3, 4])
               .filter(l => g.lvls.indexOf(l) >= 0).map(l => {
                 const n = g.members.filter(m => m.free.indexOf(l) >= 0).length;
